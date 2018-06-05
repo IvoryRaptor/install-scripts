@@ -1,13 +1,19 @@
 # install-scripts安装脚本
 # 1、安装Kubernetes集群
+安装git
+```yum install git -y```
+
+获取脚本
+git clone https://github.com/IvoryRaptor/install-scripts
+
 编辑脚本 kubeadm.sh
 ## 1.1 安装 master
 
 ## 1.2 安装 slave
+###
 
 # 2、搭建私有镜像仓库
 ## 2.1 搭建私有镜像仓库
-
 
 # 3、安装基础组件
 ## 3.1、安装Zookeeper
@@ -22,7 +28,7 @@
 
 ## 4.1、安装Elasticsearch
 
-## 4.2、安装Kibana集群
+## 4.2、安装Kibana
 
 ## 4.3、安装Influxdb
 
