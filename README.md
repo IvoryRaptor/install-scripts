@@ -5,34 +5,37 @@
 
 ## 1.2 安装 slave
 
+# 2、搭建私有镜像仓库
+## 2.1 搭建私有镜像仓库
 
-# 2、安装基础组件
-## 2.1、安装Zookeeper
 
-## 2.2、安装Kafka
+# 3、安装基础组件
+## 3.1、安装Zookeeper
 
-## 2.3、安装Redis
+## 3.2、安装Kafka
 
-## 2.4、安装Mongodb
+## 3.3、安装Redis
 
-# 3、安装监控组件
+## 3.4、安装Mongodb
 
-## 3.1、安装Elasticsearch
+# 4、安装监控组件
 
-## 3.2、安装Kibana集群
+## 4.1、安装Elasticsearch
 
-## 3.3、安装Influxdb
+## 4.2、安装Kibana集群
 
-## 3.4、安装Grafana
+## 4.3、安装Influxdb
 
-## 3.5、安装Hadoop
+## 4.4、安装Grafana
 
-## 3.6、安装Spark
+## 4.5、安装Hadoop
 
-## 3.7、安装Kubernetes Dashboard
+## 4.6、安装Spark
 
-# 3、安装服务各组件
+## 4.7、安装Kubernetes Dashboard
 
-## 3.1、安装PostOffice组件
+# 5、安装服务各组件
 
-## 3.2、安装Dashboard
+## 5.1、安装PostOffice组件
+
+## 5.2、安装Dashboard
