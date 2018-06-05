@@ -1,10 +1,16 @@
 # install-scripts安装脚本
 # 1、安装Kubernetes集群
 安装git
+
 ```yum install git -y```
 
 获取脚本
+
+```
 git clone https://github.com/IvoryRaptor/install-scripts
+cd install-scripts/k8s
+
+```
 
 编辑脚本 kubeadm.sh
 ## 1.1 安装 master
