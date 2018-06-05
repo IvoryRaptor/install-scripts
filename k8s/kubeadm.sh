@@ -89,30 +89,13 @@ gpgcheck=0
 EOF
 fi
 echo "Add docker yum repo success!"
-
-#echo '============================================================'
-#echo '====================Add kubernetes yum repo...=============='
-#echo '============================================================'
-#kubernetes yum源
-#if [! -f "/etc/yum.repos.d/kubernetes.repo"]; then
-#cat >> /etc/yum.repos.d/kubernetes.repo <<EOF
-#[kubernetes]
-#name=Kubernetes
-#baseurl=https://mirrors.aliyun.com/kubernetes/yum/repos/kubernetes-el7-x86_64/
-#enabled=1
-#gpgcheck=0
-#EOF
-#fi
-
 #echo "Add kubernetes yum repo success!"
 
 echo '============================================================'
 echo '====================Install docker...======================='
 echo '============================================================'
-#查看docker版本
-#yum list docker-engine showduplicates
 #安装docker
-yum install -y docker-engine-1.12.6-1.el7.centos.x86_64
+yum install -y docker-engine
 
 echo "Install docker success!"
 
