@@ -3,7 +3,7 @@
 #sh kubeadm.sh 172.16.120.151 master
 #sh kubeadm.sh 172.16.120.151 slave
 
-
+yum update -y
 set -o errexit
 set -o nounset
 set -o pipefail
