@@ -31,13 +31,13 @@ spec:
             - name: KAFKA_AUTO_CREATE_TOPICS_ENABLE
               value: "true"
             - name: KAFKA_NUM_PARTITIONS
-              value: "3"
+              value: "10"
             - name: KAFKA_ADVERTISED_PORT
               value: "30092"
             - name: KAFKA_ADVERTISED_HOST_NAME
               value: "39.107.126.136"
             - name: KAFKA_ZOOKEEPER_CONNECT
-              value: 39.106.153.134:32181
+              value: zookeeper:2181
           resources:
             # need more cpu upon initialization, therefore burstable class
             limits:
