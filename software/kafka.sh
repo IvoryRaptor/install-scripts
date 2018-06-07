@@ -1,3 +1,14 @@
+#!/bin/bash
+#sh kafka.sh 172.16.120.151 master
+
+MASTER_ADDRESS=${1}
+
+echo '============================================================'
+echo '===================Create Kafka Yaml File==================='
+echo '============================================================'
+
+rm -rf kafka/20-kafka.yaml
+cat >> kafka/20-kafka.yaml <<EOF
 apiVersion: apps/v1beta2
 kind: StatefulSet
 metadata:
@@ -35,7 +46,7 @@ spec:
             - name: KAFKA_ADVERTISED_PORT
               value: "30092"
             - name: KAFKA_ADVERTISED_HOST_NAME
-              value: "39.107.126.136"
+              value: "$MASTER_ADDRESS"
             - name: KAFKA_ZOOKEEPER_CONNECT
               value: zookeeper:2181
           resources:
@@ -64,3 +75,10 @@ spec:
       nodePort: 30092
   selector:
     app: kafka
+EOF
+echo 'create file kafka/20-kafka.yam'
+
+echo '============================================================'
+echo '===================Create Zookeeper Kafka==================='
+echo '============================================================'
+kubectl create -f kafka/
