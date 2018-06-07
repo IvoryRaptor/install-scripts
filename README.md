@@ -63,8 +63,19 @@ sh kafka.sh 39.106.153.134
 ```
 
 ## 3.2、安装Redis
+```
+cd install-scripts/software/
+kubectl create redis/
+```
 
 ## 3.3、安装Mongodb
+
+kubectl label nodes iz2zeca3p5tq7g7kefj8o0z mongodb=true
+
+```
+cd install-scripts/software/
+kubectl create mongodb/
+```
 
 # 4、安装监控组件
 
