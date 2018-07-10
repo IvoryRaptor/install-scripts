@@ -53,6 +53,13 @@ firewalld_stop()
 #
 docker_install()
 {
+    cat > /etc/yum.repos.d/docker.repo <<EOF
+[docker-repo]
+name=Docker Repository
+baseurl=https://mirrors.tuna.tsinghua.edu.cn/docker/yum/repo/centos7
+enabled=1
+gpgcheck=0
+EOF
     #查看docker版本
     #yum list docker-engine showduplicates
     #安装docker
