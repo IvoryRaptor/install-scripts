@@ -1,261 +1,400 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
-#sh kubeadm.sh 172.16.120.151 master
-#sh kubeadm.sh 172.16.120.151 slave
+#set -x
+#如果任何语句的执行结果不是true则应该退出,set -o errexit和set -e作用相同
+set -e
 
-yum update -y
-set -o errexit
-set -o nounset
-set -o pipefail
-
-MASTER_ADDRESS=${1:-"127.0.0.1"}
-# NODE_TYPE表示节点类型，取值为master,slave
-NODE_TYPE=${2:-"master"}
-KUBE_TOKEN=${3:-"863f67.19babbff7bfe8543"}
-DOCKER_MIRRORS=${4:-"https://5md0553g.mirror.aliyuncs.com"}
-DOCKER_GRAPH=${5:-"/mnt/docker"}
-
-KUBE_VERSION=1.8.4
-KUBE_CNI_VERSION=0.5.1
-SOCAT_VERSION=1.7.3.2
-
-KUBE_IMAGE_VERSION=v1.8.4
-KUBE_PAUSE_VERSION=3.0
-ETCD_VERSION=3.0.17
-FLANNEL_VERSION=v0.9.1
-DNS_VERSION=1.14.5
-
-echo '============================================================'
-echo '====================Disable selinux and firewalld...========'
-echo '============================================================'
-# 关闭selinux
-if [ $(getenforce) = "Enabled" ]; then
-setenforce 0
+#id -u显示用户ID,root用户的ID为0
+root=$(id -u)
+#脚本需要使用root用户执行
+if [ "$root" -ne 0 ] ;then
+    echo "must run as root"
+    exit 1
 fi
 
-# 关闭防火墙
-systemctl disable firewalld
-systemctl stop firewalld
+#
+#系统判定
+#
+linux_os()
+{
+    cnt=$(cat /etc/centos-release|grep "CentOS"|grep "release 7"|wc -l)
+    if [ "$cnt" != "1" ];then
+       echo "Only support CentOS 7...  exit"
+       exit 1
+    fi
+}
+#
+#关闭selinux
+#
+selinux_disable()
+{
+    # 关闭selinux
+    if [ $(getenforce) = "Enabled" ]; then
+    setenforce 0
+    fi
+    # selinux设置为disabled
+    sed -i 's/SELINUX=enforcing/SELINUX=disabled/g' /etc/selinux/config
+    echo "Selinux disabled success!"
+}
 
-# selinux设置为disabled
-sed -i 's/SELINUX=enforcing/SELINUX=disabled/g' /etc/selinux/config
+#
+#关闭防火墙
+#
+firewalld_stop()
+{
+    # 关闭防火墙
+    systemctl disable firewalld
+    systemctl stop firewalld
+    echo "Firewall disabled success!"
+}
 
-# Kubernetes 1.8开始要求关闭系统的Swap，如果不关闭，默认配置下kubelet将无法启动。可以通过kubelet的启动参数–fail-swap-on=false更改这个限制。
-# 修改 /etc/fstab 文件，注释掉 SWAP 的自动挂载，使用free -m确认swap已经关闭。
-swapoff -a
+#
+#安装docker
+#
+docker_install()
+{
+    cat > /etc/yum.repos.d/docker.repo <<EOF
+[docker-repo]
+name=Docker Repository
+baseurl=https://mirrors.tuna.tsinghua.edu.cn/docker/yum/repo/centos7
+enabled=1
+gpgcheck=0
+EOF
+    #查看docker版本
+    #yum list docker-engine showduplicates
+    #安装docker
+    yum install -y docker-engine
+    echo "Docker installed successfully!"
+    #docker存储目录
+    if [ ! -n "$DOCKER_GRAPH" ]; then
+        export DOCKER_GRAPH="/mnt/docker"
+    fi
+    #docker加速器
+    if [ ! -n "$DOCKER_MIRRORS" ]; then
+        export DOCKER_MIRRORS="https://5md0553g.mirror.aliyuncs.com"
+    fi
+    # 如果/etc/docker目录不存在，就创建目录
+    if [ ! -d "/etc/docker" ]; then
+     mkdir -p /etc/docker
+    fi
+    # 配置加速器
+    cat > /etc/docker/daemon.json <<EOF
+{
+    "registry-mirrors": ["${DOCKER_MIRRORS}"],
+    "graph":"${DOCKER_GRAPH}"
+}
+EOF
+    echo "Config docker success!"
+    systemctl daemon-reload
+    systemctl enable docker
+    systemctl start docker
+    echo "Docker start successfully!"
+}
 
+#
+#kubelet kubeadm kubectl kubernetes-cni安装包
+#
+kube_rpm()
+{
+    if [ ! -n "$KUBE_VERSION" ]; then
+        export KUBE_VERSION="1.9.1"
+    fi
+    if [ ! -n "$KUBE_CNI_VERSION" ]; then
+        export KUBE_CNI_VERSION="0.6.0"
+    fi
+    if [ ! -n "$SOCAT_VERSION" ]; then
+        export SOCAT_VERSION="1.7.3.2"
+    fi
+    export OSS_URL="http://centos-k8s.oss-cn-hangzhou.aliyuncs.com/rpm/"${KUBE_VERSION}"/"
+    export RPM_KUBEADM="kubeadm-"${KUBE_VERSION}"-0.x86_64.rpm"
+    export RPM_KUBECTL="kubectl-"${KUBE_VERSION}"-0.x86_64.rpm"
+    export RPM_KUBELET="kubelet-"${KUBE_VERSION}"-0.x86_64.rpm"
+    export RPM_KUBECNI="kubernetes-cni-"${KUBE_CNI_VERSION}"-0.x86_64.rpm"
+    export RPM_SOCAT="socat-"${SOCAT_VERSION}"-2.el7.x86_64.rpm"
 
-if [ -f "/etc/sysctl.d/k8s.conf" ]; then
- rm -rf /etc/sysctl.d/k8s.conf
-fi
+    export RPM_KUBEADM_URL=${OSS_URL}${RPM_KUBEADM}
+    export RPM_KUBECTL_URL=${OSS_URL}${RPM_KUBECTL}
+    export RPM_KUBELET_URL=${OSS_URL}${RPM_KUBELET}
+    export RPM_KUBECNI_URL=${OSS_URL}${RPM_KUBECNI}
+    export RPM_SOCAT_URL=${OSS_URL}${RPM_SOCAT}
+}
 
-# IPv4 iptables 链设置 CNI插件需要
-# net.bridge.bridge-nf-call-ip6tables = 1
-# net.bridge.bridge-nf-call-iptables = 1
-# 设置swappiness参数为0，linux swap空间为0
-cat >> /etc/sysctl.d/k8s.conf <<EOF
+#
+#配置docker镜像
+#
+kube_repository()
+{
+    if [ ! -n "$ETCD_VERSION" ]; then
+        export ETCD_VERSION="3.1.10"
+    fi
+    if [ ! -n "$PAUSE_VERSION" ]; then
+        export PAUSE_VERSION="3.0"
+    fi
+    if [ ! -n "$FLANNEL_VERSION" ]; then
+        export FLANNEL_VERSION="v0.9.1"
+    fi
+
+    #KUBE_REPO_PREFIX环境变量已经失效，需要通过MasterConfiguration对象进行设置
+    export KUBE_REPO_PREFIX=registry.cn-hangzhou.aliyuncs.com/szss_k8s
+}
+
+#
+#安装kubernetes的rpm包
+#
+kube_install()
+{
+    # Kubernetes 1.8开始要求关闭系统的Swap，如果不关闭，默认配置下kubelet将无法启动。可以通过kubelet的启动参数–fail-swap-on=false更改这个限制。
+    # 修改 /etc/fstab 文件，注释掉 SWAP 的自动挂载，使用free -m确认swap已经关闭。
+    swapoff -a
+    echo "Swap off success!"
+
+    # IPv4 iptables 链设置 CNI插件需要
+    # net.bridge.bridge-nf-call-ip6tables = 1
+    # net.bridge.bridge-nf-call-iptables = 1
+    # 设置swappiness参数为0，linux swap空间为0
+    cat >> /etc/sysctl.d/k8s.conf <<EOF
 net.bridge.bridge-nf-call-ip6tables = 1
 net.bridge.bridge-nf-call-iptables = 1
 vm.swappiness=0
 EOF
+    modprobe br_netfilter
+    # 生效配置
+    sysctl -p /etc/sysctl.d/k8s.conf
+    echo "Network configuration success!"
+    #kubelet kubeadm kubectl kubernetes-cni安装包
+    kube_rpm
 
-modprobe br_netfilter
+    kube_repository
 
-# 生效配置
-sysctl -p /etc/sysctl.d/k8s.conf
+    #下载安装包
+    if [ ! -f $PWD"/"$RPM_KUBEADM ]; then
+        wget $RPM_KUBEADM_URL
+    fi
+    if [ ! -f $PWD"/"$RPM_KUBECTL ]; then
+        wget $RPM_KUBECTL_URL
+    fi
+    if [ ! -f $PWD"/"$RPM_KUBELET ]; then
+        wget $RPM_KUBELET_URL
+    fi
+    if [ ! -f $PWD"/"$RPM_KUBECNI ]; then
+        wget $RPM_KUBECNI_URL
+    fi
+    if [ ! -f $PWD"/"$RPM_SOCAT ]; then
+        wget $RPM_SOCAT_URL
+    fi
+    rpm -ivh $PWD"/"$RPM_KUBECNI $PWD"/"$RPM_SOCAT $PWD"/"$RPM_KUBEADM $PWD"/"$RPM_KUBECTL $PWD"/"$RPM_KUBELET
+    echo "kubelet kubeadm kubectl kubernetes-cni installed successfully!"
 
-echo "Disable selinux and firewalld success!"
+    sed -i 's/cgroup-driver=systemd/cgroup-driver=cgroupfs/g' /etc/systemd/system/kubelet.service.d/10-kubeadm.conf
+    echo "config cgroup-driver=cgroupfs success!"
 
-echo '============================================================'
-echo '====================Add docker yum repo...=================='
-echo '============================================================'
-#aliyun docker yum源
-#cat >> /etc/yum.repos.d/docker.repo <<EOF
-# [docker-repo]
-# name=Docker Repository
-# baseurl=http://mirrors.aliyun.com/docker-engine/yum/repo/main/centos/7
-# enabled=1
-# gpgcheck=0
-# EOF
+    export KUBE_PAUSE_IMAGE=${KUBE_REPO_PREFIX}"/pause-amd64:${PAUSE_VERSION}"
 
-# dockerproject docker源
-if [ ! -f "/etc/yum.repos.d/docker.repo" ]; then
-cat >> /etc/yum.repos.d/docker.repo <<EOF
-[docker-repo]
-name=Docker Repository
-baseurl=https://yum.dockerproject.org/repo/main/centos/7
-enabled=1
-gpgcheck=0
-EOF
-fi
-echo "Add docker yum repo success!"
-#echo "Add kubernetes yum repo success!"
-
-echo '============================================================'
-echo '====================Install docker...======================='
-echo '============================================================'
-#安装docker
-yum install -y docker-engine
-
-echo "Install docker success!"
-
-echo '============================================================'
-echo '====================Config docker...========================'
-echo '============================================================'
-# 如果/etc/docker目录不存在，就创建目录
-if [ ! -d "/etc/docker" ]; then
- mkdir -p /etc/docker
-fi
-
-# 配置加速器
-if [ -f "/etc/docker/daemon.json" ]; then
- rm -rf /etc/docker/daemon.json
-fi
-
-cat > /etc/docker/daemon.json <<EOF
-{
-  "registry-mirrors": ["${DOCKER_MIRRORS}"],
-  "graph":"${DOCKER_GRAPH}"
-}
-EOF
-
-echo "Config docker success!"
-
-echo '============================================================'
-echo '====Install kubernetes-cni、kubelet、kubectl、kubeadm...====='
-echo '============================================================'
-#查看版本
-#yum list kubeadm showduplicates
-#yum list kubernetes-cni showduplicates
-#yum list kubelet showduplicates
-#yum list kubectl showduplicates
-#安装kubelet
-#yum install -y kubernetes-cni-${KUBE_CNI_VERSION}-0.x86_64 kubelet-${KUBE_VERSION}-0.x86_64 kubectl-${KUBE_VERSION}-0.x86_64 kubeadm-${KUBE_VERSION}-0.x86_64
-rpm -ivh kubernetes-cni-${KUBE_CNI_VERSION}-1.x86_64.rpm socat-${SOCAT_VERSION}-2.el7.x86_64.rpm kubeadm-${KUBE_VERSION}-0.x86_64.rpm kubectl-${KUBE_VERSION}-0.x86_64.rpm kubelet-${KUBE_VERSION}-0.x86_64.rpm
-
-echo "Install kubernetes success!"
-
-echo '============================================================'
-echo '===================Config kubelet...========================'
-echo '============================================================'
-sed -i 's/cgroup-driver=systemd/cgroup-driver=cgroupfs/g' /etc/systemd/system/kubelet.service.d/10-kubeadm.conf
-
-echo "config --pod-infra-container-image=registry.cn-hangzhou.aliyuncs.com/szss_k8s/pause-amd64:${KUBE_PAUSE_VERSION}"
-
-if [ ! -f "/etc/systemd/system/kubelet.service.d/20-pod-infra-image.conf" ]; then
-cat > /etc/systemd/system/kubelet.service.d/20-pod-infra-image.conf <<EOF
+    cat > /etc/systemd/system/kubelet.service.d/20-pod-infra-image.conf <<EOF
 [Service]
-Environment="KUBELET_EXTRA_ARGS=--pod-infra-container-image=registry.cn-hangzhou.aliyuncs.com/szss_k8s/pause-amd64:${KUBE_PAUSE_VERSION}"
+Environment="KUBELET_EXTRA_ARGS=--pod-infra-container-image=${KUBE_PAUSE_IMAGE}"
 EOF
-fi
+    echo "config --pod-infra-container-image=${KUBE_PAUSE_IMAGE} success!"
 
-echo "Config kubelet success!"
-
-echo '============================================================'
-echo '==============Start docker and kubelet services...=========='
-echo '============================================================'
-systemctl daemon-reload
-systemctl enable docker
-systemctl enable kubelet
-systemctl start docker
-systemctl start kubelet
-echo "The docker and kubelet services started"
-
-echo '============================================================'
-echo '==============pull docker images..=========================='
-echo '============================================================'
-GCR_URL=gcr.io/google_containers
-ALIYUN_URL=registry.cn-hangzhou.aliyuncs.com/szss_k8s
-
-images=(
-kube-apiserver-amd64:${KUBE_IMAGE_VERSION}
-kube-scheduler-amd64:${KUBE_IMAGE_VERSION}
-kube-controller-manager-amd64:${KUBE_IMAGE_VERSION}
-kube-proxy-amd64:${KUBE_IMAGE_VERSION}
-etcd-amd64:${ETCD_VERSION}
-k8s-dns-sidecar-amd64:${DNS_VERSION}
-k8s-dns-kube-dns-amd64:${DNS_VERSION}
-k8s-dns-dnsmasq-nanny-amd64:${DNS_VERSION}
-)
-
-for imageName in ${images[@]} ; do
-  docker pull $ALIYUN_URL/$imageName
-  docker tag $ALIYUN_URL/$imageName $GCR_URL/$imageName
-  docker rmi $ALIYUN_URL/$imageName
-done
-
-echo "The kubernetes docker images pull success!"
-
-#=========================master begin===================================
-if [ "$NODE_TYPE" = 'master' ]; then
-echo '============================================================'
-echo '==============kubeadm init=================================='
-echo '============================================================'
-
-echo "init kubernetes master..."
-#export KUBE_HYPERKUBE_IMAGE="registry.cn-hangzhou.aliyuncs.com/szss_quay_io/coreos-hyperkube:${HYPERKUBE_VERSION}"
-export KUBE_ETCD_IMAGE="registry.cn-hangzhou.aliyuncs.com/szss_k8s/etcd-amd64:${ETCD_VERSION}"
-export KUBE_REPO_PREFIX="registry.cn-hangzhou.aliyuncs.com/szss_k8s"
-
-#--token指定token,token的格式为<6 character string>.<16 character string>，指定token后可以通过cat /etc/kubernetes/pki/tokens.csv查看
-#--token-ttl=0 token-ttl表示token过期时间，0表示永远不过期
-#--pod-network-cidr指定IP段需要和kube-flannel.yml文件中配置的一致
-#--service-cidr表示service VIP
-#--pod-network-cidr表示pod网络的IP
-# 其他更多参数请通过kubeadm init --help查看
-# 参考：https://kubernetes.io/docs/reference/generated/kubeadm/
-kubeadm init --apiserver-advertise-address=${MASTER_ADDRESS} \
---kubernetes-version=v${KUBE_VERSION} \
---token=${KUBE_TOKEN} \
---token-ttl=0 \
-service-cidr=10.96.0.0/12 \
---pod-network-cidr=10.244.0.0/16 \
---skip-preflight-checks
-
-#查看token的命令
-echo "you can use this order to query the token: kubeadm token list"
-
-echo '============================================================'
-echo '=====================Config admin...========================'
-echo '============================================================'
-# $HOME/.kube目录不存在就创建
-if [ ! -d "$HOME/.kube" ]; then
-    mkdir -p $HOME/.kube
-fi
-
-# $HOME/.kube/config文件存在就删除
-if [ -f "$HOME/.kube/config" ]; then
-  rm -rf $HOME/.kube/config
-fi
-
-cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
-chown $(id -u):$(id -g) $HOME/.kube/config
-echo "Config admin success!"
+    systemctl daemon-reload
+    systemctl enable kubelet
+    systemctl start kubelet
+    echo "Kubelet installed successfully!"
+}
 
 
-echo '============================================================'
-echo '==============Create flannel service...====================='
-echo '============================================================'
-if [ -f "$HOME/kube-flannel.yml" ]; then
-  rm -rf $HOME/kube-flannel.yml
-fi
-wget -P $HOME/ https://raw.githubusercontent.com/coreos/flannel/${FLANNEL_VERSION}/Documentation/kube-flannel.yml
-sed -i 's/quay.io\/coreos\/flannel/registry.cn-hangzhou.aliyuncs.com\/szss_k8s\/flannel/g' $HOME/kube-flannel.yml
-kubectl --namespace kube-system apply -f $HOME/kube-flannel.yml
-echo "Flannel created!"
+#
+#启动主节点
+#
+kube_master_up(){
+    #关闭selinux
+    selinux_disable
+    #关闭防火墙
+    firewalld_stop
+    #安装docker
+    docker_install
+    #安装RPM包
+    kube_install
 
-fi
-#=========================master end===================================
+    if [ ! -n "$KUBE_TOKEN" ]; then
+        export KUBE_TOKEN="863f67.19babbff7bfe8543"
+    fi
+    # 其他更多参数请通过kubeadm init --help查看
+    # 参考：https://kubernetes.io/docs/reference/generated/kubeadm/
+    export KUBE_ETCD_IMAGE=${KUBE_REPO_PREFIX}"/etcd-amd64:${ETCD_VERSION}"
+
+    # 如果使用etcd集群，请使用etcd.endpoints配置
+    cat > /etc/kubernetes/kubeadm.conf <<EOF
+apiVersion: kubeadm.k8s.io/v1alpha1
+kind: MasterConfiguration
+kubernetesVersion: v${KUBE_VERSION}
+api:
+    advertiseAddress: ${MASTER_ADDRESS}
+etcd:
+    image: ${KUBE_ETCD_IMAGE}
+networking:
+    serviceSubnet: 10.96.0.0/12
+    podSubnet: 10.244.0.0/16
+imageRepository: ${KUBE_REPO_PREFIX}
+tokenTTL: 0s
+token: ${KUBE_TOKEN}
+EOF
+
+    kubeadm init --config /etc/kubernetes/kubeadm.conf --skip-preflight-checks
+
+    # $HOME/.kube目录不存在就创建
+    if [ ! -d "$HOME/.kube" ]; then
+        mkdir -p $HOME/.kube
+    fi
+
+    # $HOME/.kube/config文件存在就删除
+    if [ -f "$HOME/.kube/config" ]; then
+      rm -rf $HOME/.kube/config
+    fi
+
+    cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
+    chown $(id -u):$(id -g) $HOME/.kube/config
+    echo "Config admin success!"
+
+    if [ -f "$HOME/kube-flannel.yml" ]; then
+        rm -rf $HOME/kube-flannel.yml
+    fi
+    wget -P $HOME/ https://raw.githubusercontent.com/coreos/flannel/${FLANNEL_VERSION}/Documentation/kube-flannel.yml
+    sed -i 's/quay.io\/coreos\/flannel/registry.cn-hangzhou.aliyuncs.com\/szss_k8s\/flannel/g' $HOME/kube-flannel.yml
+    kubectl --namespace kube-system apply -f $HOME/kube-flannel.yml
+    echo "Flannel installed successfully!"
+}
+
+#
+#启动子节点
+#
+kube_slave_up()
+{
+    #关闭selinux
+    selinux_disable
+    #关闭防火墙
+    firewalld_stop
+    #安装docker
+    docker_install
+    #安装RPM包
+    kube_install
+
+    if [ ! -n "$KUBE_TOKEN" ]; then
+        export KUBE_TOKEN="863f67.19babbff7bfe8543"
+    fi
+
+    kubeadm join --token ${KUBE_TOKEN} \
+    --discovery-token-unsafe-skip-ca-verification \
+    --skip-preflight-checks \
+    ${MASTER_ADDRESS}:6443
+    echo "Join kubernetes cluster success!"
+}
+
+#
+# 重置集群
+#
+kube_reset()
+{
+    kubeadm reset
+
+    rm -rf /var/lib/cni /etc/cni/ /run/flannel/subnet.env /etc/kubernetes/kubeadm.conf
+
+    # 删除rpm安装包
+    yum remove -y kubectl kubeadm kubelet kubernetes-cni socat
+
+    #ifconfig cni0 down
+    ip link delete cni0
+    #ifconfig flannel.1 down
+    ip link delete flannel.1
+}
 
 
-#=========================slave begin===================================
-if [ "$NODE_TYPE" = 'slave' ]; then
-echo '============================================================'
-echo '==============Join kubernetes cluster...===================='
-echo '============================================================'
-export KUBE_REPO_PREFIX="registry.cn-hangzhou.aliyuncs.com/szss_k8s"
-export KUBE_ETCD_IMAGE="registry.cn-hangzhou.aliyuncs.com/szss_k8s/etcd-amd64:${ETCD_VERSION}"
-kubeadm join --token ${KUBE_TOKEN} ${MASTER_ADDRESS}:6443 --skip-preflight-checks
-echo "Join kubernetes cluster success!"
-fi
-#=========================slave end===================================
+kube_help()
+{
+    echo "usage: $0 --node-type master --master-address 127.0.0.1 --token xxxx"
+    echo "       $0 --node-type node --master-address 127.0.0.1 --token xxxx"
+    echo "       $0 reset     reset the kubernetes cluster,include all data!"
+    echo "       unkown command $0 $@"
+}
+
+
+main()
+{
+    #系统检测
+    linux_os
+    #$# 查看这个程式的参数个数
+    while [[ $# -gt 0 ]]
+    do
+        #获取第一个参数
+        key="$1"
+
+        case $key in
+            #主节点IP
+            --master-address)
+                export MASTER_ADDRESS=$2
+                #向左移动位置一个参数位置
+                shift
+            ;;
+            #获取docker存储路径
+            --docker-graph)
+                export DOCKER_GRAPH=$2
+                #向左移动位置一个参数位置
+                shift
+            ;;
+            #获取docker加速器地址
+            --docker-mirrors)
+                export DOCKER_MIRRORS=$2
+                #向左移动位置一个参数位置
+                shift
+            ;;
+            #获取节点类型
+            -n|--node-type)
+                export NODE_TYPE=$2
+                #向左移动位置一个参数位置
+                shift
+            ;;
+            #获取kubeadm的token
+            -t|--token)
+                export KUBE_TOKEN=$2
+                #向左移动位置一个参数位置
+                shift
+            ;;
+            #重置集群
+            r|reset)
+                kube_reset
+                exit 1
+            ;;
+            #获取kubeadm的token
+            -h|--help)
+                kube_help
+                exit 1
+            ;;
+            *)
+                # unknown option
+                echo "unkonw option [$key]"
+            ;;
+        esac
+        shift
+    done
+
+    if [ "" == "$MASTER_ADDRESS" -o "" == "$NODE_TYPE" ];then
+        if [ "$NODE_TYPE" != "down" ];then
+            echo "--master-address and --node-type must be provided!"
+            exit 1
+        fi
+    fi
+
+ case $NODE_TYPE in
+    "m" | "master" )
+        kube_master_up
+        ;;
+    "n" | "node" )
+        kube_slave_up
+        ;;
+    *)
+        kube_help
+        ;;
+ esac
+}
+
+main $@
