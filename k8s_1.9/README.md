@@ -1,0 +1,2 @@
+
+journalctl -u kubelet -s
