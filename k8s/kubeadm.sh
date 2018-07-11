@@ -147,6 +147,9 @@ kube_install()
     # 修改 /etc/fstab 文件，注释掉 SWAP 的自动挂载，使用free -m确认swap已经关闭。
     swapoff -a
     echo "Swap off success!"
+cat >>/etc/sysctl.conf <<EOF
+net.ipv4.ip_forward = 1
+EOF
 
     # IPv4 iptables 链设置 CNI插件需要
     # net.bridge.bridge-nf-call-ip6tables = 1
@@ -159,7 +162,7 @@ vm.swappiness=0
 EOF
     modprobe br_netfilter
     # 生效配置
-    sysctl -p /etc/sysctl.d/k8s.conf
+    sysctl -p
     echo "Network configuration success!"
     #kubelet kubeadm kubectl kubernetes-cni安装包
     kube_rpm
