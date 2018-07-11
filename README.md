@@ -8,14 +8,14 @@ git clone https://github.com/IvoryRaptor/install-scripts
 ## 1.2、安装 master
 ```
 cd install-scripts/k8s
-sh kubeadm.sh 39.106.153.134 master 863f67.19babbff7bfe8543#安装集群Master
+sh kubeadm.sh --node-type master --master-address 172.16.120.191
 ```
 >> 注意：此处后面的位token，集群中该值必须统一。
 
 ## 1.3、在集群中其他机器上，安装 slave
 ```
 cd install-scripts/k8s
-sh kubeadm.sh 39.106.153.134 slave 863f67.19babbff7bfe8543#其他机器安装
+sh kubeadm.sh --node-type node --master-address 172.16.120.191#其他机器安装
 ```
 >> 注意：此处后面的位token，集群中该值必须统一。
 
