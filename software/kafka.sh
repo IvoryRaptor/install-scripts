@@ -1,5 +1,5 @@
 #!/bin/bash
-#sh kafka.sh 172.16.120.151 master
+#sh kafka.sh 172.16.120.151
 
 MASTER_ADDRESS=${1}
 

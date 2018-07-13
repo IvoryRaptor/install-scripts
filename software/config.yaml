@@ -1,0 +1,21 @@
+mongodb:
+  node: node1
+redis:
+  node:
+  limits:
+    cpu: 200
+    memory: 1024
+zookeeper:
+  node:
+  limits:
+    cpu: 200
+    memory: 1024
+kafka:
+  node:
+  port: 30181
+  limits:
+    cpu: 500
+    memory: 2048
+  requests:
+    memory: 1024
+    cpu: 100

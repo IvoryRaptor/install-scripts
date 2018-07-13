@@ -150,6 +150,7 @@ kube_install()
 cat >>/etc/sysctl.conf <<EOF
 net.ipv4.ip_forward = 1
 EOF
+sysctl -p
 
     # IPv4 iptables 链设置 CNI插件需要
     # net.bridge.bridge-nf-call-ip6tables = 1
